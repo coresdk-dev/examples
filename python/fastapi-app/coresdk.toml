@@ -1,0 +1,33 @@
+# CoreSDK configuration for the fastapi-app example
+# Override any value with environment variables: CORESDK_<KEY>=value
+
+[sdk]
+sidecar_addr   = "[::1]:50051"   # address of the running coresdk-sidecar
+tenant_id      = "acme-corp"     # your tenant / organisation slug
+service_name   = "product-api"  # name of this service (appears in traces)
+fail_mode      = "open"          # "open" = allow on sidecar error | "closed" = deny
+dev_mode       = false           # true = skip auth in local dev (never in prod)
+
+[tenants]
+# Define every tenant your service serves.
+# The JWT claim "tenant_id" must match one of these slugs.
+[tenants.acme-corp]
+name        = "Acme Corp"
+plan        = "pro"
+
+[tenants.globex]
+name        = "Globex Inc"
+plan        = "starter"
+
+[policy]
+# Path to your Rego bundle directory (loaded by the sidecar).
+# Leave empty to use the sidecar default (fail-open without a bundle).
+bundle_dir = ""
+# rule evaluated for every request (must return boolean)
+default_rule = "data.authz.allow"
+
+[observability]
+# Set OTEL_EXPORTER_OTLP_ENDPOINT to send traces to your collector.
+# e.g. http://localhost:4317 for a local collector.
+service_version = "1.0.0"
+environment     = "development"

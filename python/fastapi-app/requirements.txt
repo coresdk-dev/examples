@@ -1,0 +1,4 @@
+coresdk[fastapi]
+uvicorn[standard]
+pytest
+httpx
