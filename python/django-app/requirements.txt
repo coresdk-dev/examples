@@ -1,0 +1,5 @@
+coresdk[django]
+djangorestframework
+gunicorn
+pytest
+pytest-django
