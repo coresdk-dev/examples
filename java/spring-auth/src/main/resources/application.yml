@@ -1,0 +1,7 @@
+coresdk:
+  endpoint: localhost:50051
+  tenant-id: default
+  fail-mode: open
+  control-plane-url: http://localhost:8080
+server:
+  port: 8081
