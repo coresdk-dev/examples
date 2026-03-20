@@ -11,7 +11,6 @@ Run:
     python 06_pii_safe_tracing.py
 """
 import sys
-sys.path.insert(0, "/tmp/coresdk-sdk-python")
 
 from coresdk.tracing.decorator import trace
 from coresdk.tracing.processor import mask_attributes, mask_value, REDACTED

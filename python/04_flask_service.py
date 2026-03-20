@@ -9,7 +9,6 @@ Run:
 """
 import os
 import sys
-sys.path.insert(0, "/tmp/coresdk-sdk-python")
 
 from flask import Flask, g, jsonify, request
 

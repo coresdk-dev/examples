@@ -6,10 +6,6 @@ Usage:
     coresdk-sidecar &          # terminal 1 — start sidecar
     python demo.py             # terminal 2 — run demo
 """
-import sys
-
-sys.path.insert(0, "/tmp/coresdk-sdk-python")
-
 from coresdk import CoreSDKClient, SDKConfig
 from coresdk.errors._rfc9457 import ProblemDetailError
 from coresdk.testing._mock import assert_no_pii, FakeSpanExporter

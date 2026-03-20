@@ -6,16 +6,21 @@ Run:      uvicorn main:app --reload
 Try:      curl -H "Authorization: Bearer <token>" http://localhost:8000/me
 """
 from fastapi import FastAPI, Depends
-from coresdk.fastapi import require_auth, CurrentUser
+from coresdk import SDK, Claims
+from coresdk.middleware.fastapi import require_auth
 
+sdk = SDK.from_env()
 app = FastAPI()
 
 
 @app.get("/me")
-async def me(user: CurrentUser = Depends(require_auth)):
-    return {"user_id": user.sub, "tenant": user.tenant_id, "roles": user.roles}
+async def me(claims: Claims = Depends(require_auth(sdk))):
+    return {"user_id": claims.sub, "tenant": claims.tenant_id, "roles": claims.roles}
 
 
 @app.get("/admin")
-async def admin(user: CurrentUser = Depends(require_auth("admin"))):
-    return {"message": f"Hello admin {user.sub}"}
+async def admin(claims: Claims = Depends(require_auth(sdk))):
+    if "admin" not in claims.roles:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return {"message": f"Hello admin {claims.sub}"}

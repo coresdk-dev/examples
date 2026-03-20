@@ -5,7 +5,6 @@ Talks to a REAL running sidecar over gRPC via the SDK client (no mocks).
 Usage:  python e2e_test.py
 """
 import json, os, sys, time
-sys.path.insert(0, "/tmp/coresdk-sdk-python")
 
 import grpc
 from coresdk._client import CoreSDKClient

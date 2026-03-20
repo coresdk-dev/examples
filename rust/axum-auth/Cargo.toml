@@ -1,0 +1,15 @@
+[package]
+name = "axum-auth"
+version = "0.1.0"
+edition = "2021"
+description = "CoreSDK — Axum JWT auth example (direct engine embedding)"
+
+[dependencies]
+axum          = "0.7"
+tokio         = { version = "1", features = ["full"] }
+serde_json    = "1"
+tracing       = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow        = "1"
+
+coresdk-engine = { path = "../../.." }
