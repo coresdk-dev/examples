@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, stage, release]
+  pull_request:
+    branches: [develop]
+
+jobs:
+  python:
+    name: Python examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff mypy
+      - run: ruff check python/
+      - run: ruff format --check python/
+
+  typescript:
+    name: TypeScript examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: |
+          cd typescript/express-auth && npm ci && npx tsc --noEmit
+          cd ../nextjs-edge && npm ci 2>/dev/null || true
+
+  go:
+    name: Go examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: |
+          for d in go/*/; do
+            cd $d && go vet ./... && cd ../..
+          done
+
+  rust:
+    name: Rust examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          for d in rust/*/; do
+            cd $d && cargo check && cd ../..
+          done
