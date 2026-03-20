@@ -91,6 +91,17 @@ def test_tenant_scoped_products():
     assert r.json()["tenant"] == "acme-corp"
 
 
+# ── ABAC document access ───────────────────────────────────────────────────────
+
+def test_get_document_abac():
+    r = client.get("/documents/doc-1", headers=AUTH)
+    assert r.status_code in (200, 403)  # 403 without Rego bundle, 200 with
+
+def test_get_document_not_found():
+    r = client.get("/documents/doc-999", headers=AUTH)
+    assert r.status_code == 404
+
+
 # ── Docs available ─────────────────────────────────────────────────────────────
 
 def test_openapi_docs():

@@ -22,7 +22,7 @@ plan        = "starter"
 [policy]
 # Path to your Rego bundle directory (loaded by the sidecar).
 # Leave empty to use the sidecar default (fail-open without a bundle).
-bundle_dir = ""
+bundle_dir = "../../policy"  # set to "" to use sidecar default (fail-open without a bundle)
 # rule evaluated for every request (must return boolean)
 default_rule = "data.authz.allow"
 

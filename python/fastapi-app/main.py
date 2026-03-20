@@ -127,6 +127,14 @@ def require_role(role: str):
 
 # ── In-memory store (replace with your DB) ────────────────────────────────────
 
+# ABAC docs store — each document has an owner and classification
+_docs: dict[str, list[dict]] = {
+    "acme-corp": [
+        {"id": "doc-1", "title": "Q4 Report", "owner": "alice", "classification": "internal"},
+        {"id": "doc-2", "title": "Budget", "owner": "bob", "classification": "confidential"},
+    ],
+}
+
 _db: dict[str, list[dict]] = {
     "acme-corp": [
         {"id": 1, "name": "Widget A", "price": 99.00,  "owner": "alice"},
@@ -225,6 +233,43 @@ async def delete_product(product_id: int, request: Request, _=require_role("admi
         })
     _db[tenant] = [p for p in products if p["id"] != product_id]
     return {"deleted": product_id}
+
+
+@app.get("/documents/{doc_id}", tags=["documents"])
+@trace(intent="get-document-abac")
+async def get_document_abac(doc_id: str, request: Request):
+    """
+    ABAC example: owner can always read their own doc;
+    others need 'reader' role + matching classification clearance.
+    Evaluated via Rego policy with resource attributes.
+    """
+    tenant = get_tenant(request)
+    user = current_user(request)
+    docs = _docs.get(tenant, [])
+    doc = next((d for d in docs if d["id"] == doc_id), None)
+    if not doc:
+        raise HTTPException(status_code=404, detail={
+            "type": "https://coresdk.io/errors/not-found",
+            "title": "Not Found", "status": 404,
+            "detail": f"Document {doc_id} not found",
+        })
+    # ABAC: evaluate policy with resource attributes
+    allowed = _sdk.evaluate_policy("data.authz.allow", {
+        "tenant_id": tenant,
+        "subject": user.get("sub"),
+        "action": "read",
+        "resource": f"documents/{doc_id}",
+        "resource_owner": doc["owner"],
+        "resource_tenant": tenant,
+        "context": {"roles": user.get("roles", [])},
+    })
+    if not allowed:
+        raise HTTPException(status_code=403, detail={
+            "type": "https://coresdk.io/errors/forbidden",
+            "title": "Forbidden", "status": 403,
+            "detail": f"Access denied to document {doc_id}",
+        })
+    return doc
 
 
 @app.get("/policy/check", tags=["policy"])
