@@ -1,4 +1,4 @@
-# FastAPI App — CoreSDK Feature Coverage
+# Flask App — CoreSDK Feature Coverage
 
 All 47 CoreSDK features mapped to this example, the Python SDK, and the roadmap.
 
@@ -11,13 +11,13 @@ Legend: ✅ demonstrated here · 🔌 SDK/sidecar handles it (no app code needed
 | # | Feature | In this app | Where / How |
 |---|---------|:-----------:|-------------|
 | 1.1 | JWT / OIDC / JWK auth (RS256, ES256, PS256) | ✅ | `CoreSDKMiddleware` validates every `Authorization: Bearer` header via sidecar. Set `CORESDK_JWKS_URL` for real IdP. |
-| 1.2 | RBAC / ABAC authorization | ✅ | RBAC: `require_role("editor")` on `POST /products`, `require_role("admin")` on `DELETE` and `GET /tenants`. ABAC: `GET /documents/{doc_id}` evaluates `data.authz.allow` with `input.user.department` and `input.resource.owner` attributes via Rego. |
-| 1.3 | Rego policy engine (<2ms p99) | ✅ | `GET /policy/check` calls `_sdk.evaluate_policy("data.authz.allow", {...})`. ABAC route evaluates document ownership policy inline. |
+| 1.2 | RBAC / ABAC authorization | ✅ | `@require_role("editor")` on `POST /products`, `@require_role("admin")` on `DELETE` and `GET /tenants` |
+| 1.3 | Rego policy engine (<2ms p99) | ✅ | `GET /policy/check` calls `_sdk.evaluate_policy("data.authz.allow", {...})` |
 | 1.4 | Config hot-reload | ✅ | `load_config()` reads `coresdk.toml`; all `sdk.*` keys overridable via `CORESDK_*` env vars |
 | 1.5 | PII / secrets masking | 🔌 | Sidecar's `SpanProcessor` redacts emails, tokens, API keys from all spans before export. Zero app code needed. |
-| 1.6 | Tenant context propagation | ✅ | `get_tenant(request)` reads `tenant_id` from JWT claims → passed to every DB query and policy call |
+| 1.6 | Tenant context propagation | ✅ | `get_tenant()` reads `tenant_id` from `g.claims.tenant_id` → passed to every DB query and policy call |
 | 1.7 | Multi-tenancy enforcement | ✅ | `_db.get(tenant, [])` — each tenant sees only their own products. Two tenants in `coresdk.toml`: `acme-corp`, `globex` |
-| 1.8 | RFC 9457 error format | ✅ | All 401/403/404 return `application/problem+json` with `type` / `title` / `status` / `detail`. Exception handler registered. |
+| 1.8 | RFC 9457 error format | ✅ | All 401/403/404 return `application/problem+json` with `type` / `title` / `status` / `detail`. Flask error handlers registered. |
 | 1.9 | TLS 1.3 transport | 🔌 | SDK↔sidecar is always TLS 1.3 (mTLS). No app config needed. |
 | 1.10 | Versioned gRPC API | 🔌 | SDK speaks `v1` proto. Sidecar exposes `AuthService`, `PolicyService`, `ConfigService`, `TenantService`. |
 | 1.11 | Resilience (retry / circuit breaker / timeout) | 🔌 | Built into `CoreSDKClient`. Failures surface as RFC 9457 errors. |
@@ -34,9 +34,9 @@ Legend: ✅ demonstrated here · 🔌 SDK/sidecar handles it (no app code needed
 | 1.15 | Distributed tracing (OTel Traces) | ✅ | `@trace(intent="list-products")` on every route creates OTel spans with W3C `traceparent` propagation. |
 | 1.16 | OTel metrics export | 🔌 | Sidecar exports request counters, latency histograms, circuit-breaker state via OTLP. |
 | 1.17 | OTLP export (traces + metrics + logs) | 🔌 | `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317` → Jaeger / Grafana / Datadog. |
-| 1.18 | Middleware framework | ✅ | `app.add_middleware(CoreSDKMiddleware, sdk=SDKAdapter(), exclude_paths=["/healthz", ...])` |
-| 1.19 | RFC 9457 error propagation in SDK | ✅ | `@app.exception_handler(ProblemDetailError)` converts all SDK errors to `problem+json` responses. |
-| 1.20 | Intent annotations (`@trace`) | ✅ | Every route: `@trace(intent="list-products")`, `@trace(intent="policy-check")`, `@trace(intent="get-document")`, etc. |
+| 1.18 | Middleware framework | ✅ | `CoreSDKMiddleware(app, sdk=SDKAdapter(), exclude_paths=["/healthz", ...])` |
+| 1.19 | RFC 9457 error propagation in SDK | ✅ | Flask `@app.errorhandler(ProblemDetailError)` converts all SDK errors to `problem+json` responses with `Content-Type: application/problem+json`. |
+| 1.20 | Intent annotations (`@trace`) | ✅ | Every route: `@trace(intent="list-products")`, `@trace(intent="policy-check")`, etc. |
 | 1.21 | Recovery hints | 🔌 | SDK attaches structured hints to RFC 9457 `extensions` field. Visible in error responses automatically. |
 | 1.22 | CLI tooling | ➖ | `coresdk` CLI for local testing and policy dry-run. Not app code. |
 | 1.23 | Terminal trace viewer | ➖ | `coresdk traces` — interactive span tree in terminal. Not app code. |
@@ -85,12 +85,12 @@ Legend: ✅ demonstrated here · 🔌 SDK/sidecar handles it (no app code needed
 
 | Phase | Total | ✅ In this app | 🔌 SDK/sidecar | 🗺 Roadmap | ➖ N/A |
 |-------|-------|:---:|:---:|:---:|:---:|
-| Phase 1a — Core Engine | 11 | **8** | 3 | 0 | 0 |
-| Phase 1b — Wrapper + Sidecar | 12 | **5** | 5 | 0 | 2 |
+| Phase 1a — Core Engine | 11 | **7** | 4 | 0 | 0 |
+| Phase 1b — Wrapper + Sidecar | 12 | **4** | 6 | 0 | 2 |
 | Phase 2 — Production | 17 | 0 | 1 | **16** | 0 |
 | Phase 3 — Enterprise | 7 | 0 | 0 | **7** | 0 |
-| **Total** | **47** | **13** | **9** | **23** | **2** |
+| **Total** | **47** | **11** | **11** | **23** | **2** |
 
-**13 of 47 features are actively demonstrated in this app.**
-**9 more work automatically — zero app code required.**
+**11 of 47 features are actively demonstrated in this app.**
+**11 more work automatically — zero app code required.**
 **23 are on the roadmap (Phase 2–3).**
