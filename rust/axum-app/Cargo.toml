@@ -1,0 +1,27 @@
+[package]
+name = "axum-app"
+version = "0.1.0"
+edition = "2021"
+description = "CoreSDK — complete Axum REST API example (direct engine embedding)"
+
+# After `cargo add coresdk-engine`, remove the path dep and use the published crate:
+#   coresdk-engine = "0.1"
+#
+# For this local example we reference the workspace via a relative path.
+# Adjust the path to point at your checkout of https://github.com/coresdk-dev/core
+[dependencies]
+axum          = "0.7"
+tokio         = { version = "1", features = ["full"] }
+tower         = "0.4"
+tower-http    = { version = "0.5", features = ["trace", "cors"] }
+serde         = { version = "1", features = ["derive"] }
+serde_json    = "1"
+tracing       = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow        = "1"
+uuid          = { version = "1", features = ["v4"] }
+http          = "1"
+
+# CoreSDK engine — embeds auth, policy, masking, config, resilience in-process.
+# No sidecar required for Rust.  Swap path for crates.io version after `cargo add`.
+coresdk-engine = { path = "../../.." }
