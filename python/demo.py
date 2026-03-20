@@ -1,17 +1,19 @@
 """
 CoreSDK Python SDK — live demo
-Runs without a sidecar using MockSDK (drop-in for testing/local dev).
+Connects to a running coresdk-sidecar at [::1]:50051.
 
-Usage:  python demo.py
+Usage:
+    coresdk-sidecar &          # terminal 1 — start sidecar
+    python demo.py             # terminal 2 — run demo
 """
-import json
 import sys
 
 sys.path.insert(0, "/tmp/coresdk-sdk-python")
 
-from coresdk._types import AuthDecision
+from coresdk import CoreSDKClient, SDKConfig
 from coresdk.errors._rfc9457 import ProblemDetailError
-from coresdk.testing._mock import MockSDK, assert_no_pii
+from coresdk.testing._mock import assert_no_pii, FakeSpanExporter
+from coresdk.tracing.decorator import trace
 from coresdk.tracing.processor import mask_attributes
 
 RESET = "\033[0m"
@@ -31,64 +33,56 @@ def ok(label, value=""):   print(f"  {GREEN}✓{RESET}  {BOLD}{label}{RESET}  {D
 def fail(label, value=""): print(f"  {RED}✗{RESET}  {BOLD}{label}{RESET}  {DIM}{value}{RESET}")
 def info(label):           print(f"  {YEL}→{RESET}  {label}")
 
-# ── 1. SDK initialisation ─────────────────────────────────────────────────
+# ── 1. SDK initialisation ──────────────────────────────────────────────────
 header("1 · SDK Initialisation")
 
-sdk = MockSDK(
-    default_allow=True,
-    default_claims={"sub": "alice", "tenant_id": "acme-corp", "roles": ["admin", "user"]},
-)
-ok("MockSDK created", "no sidecar needed for local dev/testing")
-ok("Tenant",      sdk.config.tenant_id)
-ok("Fail mode",   sdk.config.fail_mode)
-ok("Dev mode",    str(sdk.config.dev_mode))
+sdk = CoreSDKClient(SDKConfig(
+    sidecar_addr = "[::1]:50051",
+    tenant_id    = "acme-corp",
+    service_name = "demo",
+    fail_mode    = "open",   # allow requests even if sidecar unreachable
+))
+ok("CoreSDKClient created",
+   f"sidecar={sdk.config.sidecar_addr}  tenant={sdk.config.tenant_id}")
+ok("Fail mode",  sdk.config.fail_mode)
+ok("Dev mode",   str(sdk.config.dev_mode))
 
-# ── 2. Token validation ───────────────────────────────────────────────────
+# ── 2. Token validation ────────────────────────────────────────────────────
 header("2 · JWT Token Validation")
 
-decision = sdk.authorize("eyJhbGciOiJSUzI1NiJ9.valid.sig")
-ok(
-    f"Valid token → allowed={decision.allowed}",
-    f"sub={decision.claims['sub']}  roles={decision.claims['roles']}",
-)
+# validate_token calls the sidecar; fail-open returns allowed=True if unreachable
+decision = sdk.validate_token("Bearer eyJhbGciOiJSUzI1NiJ9.valid.sig")
+colour = GREEN if decision.allowed else RED
+mark   = "✓" if decision.allowed else "✗"
+print(f"  {colour}{mark}{RESET}  {BOLD}Token validation → allowed={decision.allowed}{RESET}  "
+      f"{DIM}reason={decision.reason or 'ok'}  sub={decision.claims.get('sub', '—')}{RESET}")
 
-sdk.set_token_rejected("revoked-token-xyz", reason="token revoked")
-decision2 = sdk.authorize("revoked-token-xyz")
-fail(
-    f"Revoked token → allowed={decision2.allowed}",
-    f"reason={decision2.reason}",
-)
+# No token → 401
+try:
+    sdk.validate_token("")
+    fail("Empty token → should have raised")
+except (ProblemDetailError, ValueError) as e:
+    ok("Empty token → raised as expected", str(e)[:60])
+except Exception:
+    info("Empty token → sidecar not reachable (fail-open)")
 
-sdk.set_token_decision(
-    "guest-token",
-    AuthDecision(allowed=True, claims={"sub": "guest", "roles": ["viewer"]}, reason=""),
-)
-decision3 = sdk.authorize("guest-token")
-ok(
-    f"Guest token → allowed={decision3.allowed}",
-    f"sub={decision3.claims['sub']}  roles={decision3.claims['roles']}",
-)
-
-info(f"Total authorize calls recorded: {len(sdk.authorize_calls)}")
-
-# ── 3. Policy evaluation ──────────────────────────────────────────────────
+# ── 3. Policy evaluation ───────────────────────────────────────────────────
 header("3 · Rego Policy Evaluation")
 
-# MockSDK always returns True — show the call recording
-result = sdk.evaluate_policy("documents.read",   {"user": "alice", "doc": "doc-1"})
-ok(f"documents.read   → {result}")
+cases = [
+    ("data.authz.allow", {"subject": "alice", "action": "read",   "resource": "reports/q4"}),
+    ("data.authz.allow", {"subject": "alice", "action": "delete", "resource": "reports/q4"}),
+    ("data.authz.allow", {"subject": "bob",   "action": "read",   "resource": "billing"}),
+]
 
-result = sdk.evaluate_policy("documents.write",  {"user": "alice", "doc": "doc-1"})
-ok(f"documents.write  → {result}")
+for rule, inp in cases:
+    result = sdk.evaluate_policy(rule, inp)
+    colour = GREEN if result else YEL
+    mark   = "✓" if result else "→"
+    print(f"  {colour}{mark}{RESET}  {inp['subject']} {inp['action']} {inp['resource']}"
+          f"  {DIM}→ {result}{RESET}")
 
-result = sdk.evaluate_policy("admin.delete_user", {"user": "alice", "target": "bob"})
-ok(f"admin.delete_user → {result}")
-
-info(f"Total policy calls recorded: {len(sdk.policy_calls)}")
-for call in sdk.policy_calls:
-    print(f"     {DIM}rule={call['rule']}  input={call['input']}{RESET}")
-
-# ── 4. PII masking ────────────────────────────────────────────────────────
+# ── 4. PII masking ─────────────────────────────────────────────────────────
 header("4 · PII Masking (Zero-PII Span Attributes)")
 
 raw_attrs = {
@@ -110,7 +104,7 @@ for k in raw_attrs:
     tag    = "REDACTED" if after == "[REDACTED]" else "safe    "
     print(f"     {colour}{tag}{RESET}  {k}: {DIM}{before[:40]}{RESET}")
 
-# ── 5. assert_no_pii ─────────────────────────────────────────────────────
+# ── 5. assert_no_pii ──────────────────────────────────────────────────────
 header("5 · assert_no_pii (Test Utility)")
 
 class CleanSpan:
@@ -131,7 +125,7 @@ try:
 except AssertionError as e:
     ok("Dirty span  → caught by assert_no_pii", str(e)[:60])
 
-# ── 6. RFC 9457 error types ───────────────────────────────────────────────
+# ── 6. RFC 9457 error types ────────────────────────────────────────────────
 header("6 · RFC 9457 Problem Detail Errors")
 
 for err in [
@@ -143,32 +137,39 @@ for err in [
     colour = RED if d["status"] >= 400 else GREEN
     print(f"  {colour}HTTP {d['status']}{RESET}  {BOLD}{d['title']}{RESET}  {DIM}{d.get('detail','')}{RESET}")
 
-# ── 7. FastAPI middleware ─────────────────────────────────────────────────
+# ── 7. FastAPI middleware ──────────────────────────────────────────────────
 header("7 · FastAPI Middleware (TestClient — no server needed)")
 
 try:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+    from fastapi.responses import JSONResponse
 
     from coresdk.middleware.fastapi import CoreSDKMiddleware
 
-    app = FastAPI()
-    app.add_middleware(CoreSDKMiddleware, sdk=sdk)
+    class _Adapter:
+        config = sdk.config
+        def authorize(self, token, **kw):      return sdk.validate_token(token, **kw)
+        def authorize_sync(self, token, **kw): return sdk.validate_token(token, **kw)
 
-    @app.get("/me")
-    async def me():
-        return {"user": "alice", "tenant": "acme-corp", "roles": ["admin"]}
+    demo_app = FastAPI()
+    demo_app.add_middleware(CoreSDKMiddleware, sdk=_Adapter(),
+                            exclude_paths=["/healthz"])
 
-    @app.get("/public")
-    async def public():
+    @demo_app.get("/healthz")
+    async def healthz():
         return {"status": "ok"}
 
-    client = TestClient(app, raise_server_exceptions=False)
+    @demo_app.get("/me")
+    async def me():
+        return {"user": "alice", "tenant": "acme-corp"}
+
+    client = TestClient(demo_app, raise_server_exceptions=False)
 
     cases = [
-        ("GET /me     + token", "/me",     {"Authorization": "Bearer valid-token"}),
-        ("GET /me     no token", "/me",    {}),
-        ("GET /public + token", "/public", {"Authorization": "Bearer valid-token"}),
+        ("GET /healthz  (no auth needed)", "/healthz", {}),
+        ("GET /me       with token",        "/me",      {"Authorization": "Bearer alice-token"}),
+        ("GET /me       no token",          "/me",      {}),
     ]
 
     for label, path, headers in cases:
@@ -179,12 +180,13 @@ try:
 except ImportError:
     info("FastAPI not installed — skipping")
 
-# ── Summary ───────────────────────────────────────────────────────────────
+# ── Summary ────────────────────────────────────────────────────────────────
 header("Summary")
-ok("JWT validation  (allow / reject / custom decisions)")
-ok("Policy evaluation  (Rego rules, call recording)")
+ok("JWT validation  (real sidecar call, fail-open fallback)")
+ok("Policy evaluation  (Rego rules via sidecar)")
 ok("PII masking  (email, Bearer token, API key → REDACTED)")
 ok("assert_no_pii  (clean span passes, dirty span caught)")
 ok("RFC 9457 errors  (401 / 403 / 404 structured responses)")
 ok("FastAPI middleware  (200 with token, 401 without)")
-print(f"\n  {DIM}Swap MockSDK → SDK.from_env() to connect to a real sidecar.{RESET}\n")
+print(f"\n  {DIM}Set CORESDK_JWKS_URL to your IdP for real JWT validation.{RESET}")
+print(f"  {DIM}Set CORESDK_FAIL_MODE=closed to deny on sidecar errors.{RESET}\n")

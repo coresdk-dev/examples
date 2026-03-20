@@ -15,7 +15,7 @@ sys.path.insert(0, "/tmp/coresdk-sdk-python")
 
 from coresdk.tracing.decorator import trace
 from coresdk.tracing.processor import mask_attributes, mask_value, REDACTED
-from coresdk.testing._mock import assert_no_pii, FakeSpanExporter
+from coresdk.testing._mock import assert_no_pii
 
 RESET = "\033[0m"; GREEN = "\033[32m"; RED = "\033[31m"
 CYAN  = "\033[36m"; BOLD  = "\033[1m"; DIM  = "\033[2m"
