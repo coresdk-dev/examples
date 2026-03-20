@@ -1,0 +1,3 @@
+coresdk[flask]
+gunicorn
+pytest

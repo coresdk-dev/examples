@@ -1,0 +1,26 @@
+# CoreSDK configuration for the flask-app example
+# Override any value with environment variables: CORESDK_<KEY>=value
+
+[sdk]
+sidecar_addr   = "[::1]:50051"   # address of the running coresdk-sidecar
+tenant_id      = "acme-corp"     # your tenant / organisation slug
+service_name   = "order-api"    # name of this service (appears in traces)
+fail_mode      = "open"          # "open" = allow on sidecar error | "closed" = deny
+dev_mode       = false           # true = skip auth in local dev (never in prod)
+
+[tenants]
+[tenants.acme-corp]
+name        = "Acme Corp"
+plan        = "pro"
+
+[tenants.globex]
+name        = "Globex Inc"
+plan        = "starter"
+
+[policy]
+bundle_dir   = ""
+default_rule = "data.authz.allow"
+
+[observability]
+service_version = "1.0.0"
+environment     = "development"
