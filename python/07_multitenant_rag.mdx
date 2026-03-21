@@ -1,0 +1,390 @@
+# Building a Secure Multi-Tenant RAG System
+
+> **What you'll build**: AskAcme — a Retrieval-Augmented Generation (RAG) API that serves three enterprise
+> customers from one deployment. Each customer's documents are isolated, roles control who can read vs.
+> ingest vs. delete, and PII documents are hidden behind an explicit `pii_access` role.
+> CoreSDK handles all of this with a single middleware line.
+
+## The Story
+
+**Acme Intelligence** has three enterprise customers:
+
+| Customer | Knowledge Base | Users |
+|---|---|---|
+| `acme-corp` | Financial reports, board decks | CFO, analysts |
+| `globex` | Engineering wikis, runbooks | Devs, SREs |
+| `initech` | HR policies, employee handbook | HR, all staff |
+
+They share one deployment. The challenge: **every customer's data must be invisible to every other customer** — even if someone sends the wrong token. And certain documents (salary data, SSNs) must be hidden unless the user has a specific `pii_access` role.
+
+CoreSDK enforces:
+- JWT authentication on every route
+- Tenant isolation baked into the query path — not just an `if` statement
+- Role-based access for write operations
+- PII document gating at retrieval time
+- Fail-open mode — the service keeps running if the sidecar restarts
+
+---
+
+## Architecture
+
+```
+Browser / API Client
+       │
+       │  Authorization: Bearer <JWT>
+       ▼
+┌─────────────────────────────────┐
+│         FastAPI App             │
+│                                 │
+│  CoreSDKMiddleware              │  ← validates JWT on every request
+│       │                         │
+│       ▼                         │
+│  /query  /ingest  /documents    │
+│       │                         │
+│       ▼                         │
+│  VectorStore (per-tenant ns)    │  ← tenant_id from JWT claims
+│       │                         │
+│       ▼                         │
+│  LLM (mocked / swap in claude)  │
+└─────────────────────────────────┘
+       │
+       │  gRPC :50051
+       ▼
+┌─────────────────┐
+│  CoreSDK Sidecar│  ← JWT validation, policy eval, audit
+└─────────────────┘
+```
+
+The key insight: **`tenant_id` comes from JWT claims, not from the request body**. A user cannot query a different tenant by changing a URL parameter — the sidecar cryptographically validates the token and the middleware extracts the tenant.
+
+---
+
+## Prerequisites
+
+```bash
+# Python 3.9+
+pip install coresdk fastapi uvicorn httpx
+```
+
+For a local sidecar (optional — service works in fail-open without it):
+```bash
+# Using Docker
+docker run -p 50051:50051 ghcr.io/coresdk-dev/sidecar:latest
+
+# Or run directly
+cargo run -p coresdk-sidecar
+```
+
+---
+
+## Quickstart
+
+### 1. Clone the example
+
+```bash
+git clone https://github.com/coresdk-dev/examples
+cd examples/python
+```
+
+### 2. Run with MockSDK (no sidecar needed)
+
+This is the fastest way to get started. MockSDK stands in for the real sidecar — perfect for local dev and CI.
+
+```bash
+CORESDK_USE_MOCK=true python 07_multitenant_rag.py
+```
+
+You'll see all 17 tests pass:
+
+```
+AskAcme RAG — End-to-End Test Suite
+==================================================
+
+▸ Ops Endpoints
+  [PASS]  GET /healthz → 200 (bypasses auth)
+  [PASS]  GET /readyz → 200 (bypasses auth)
+  [PASS]  POST /query without token → 401
+
+▸ acme-corp — Financial Knowledge Base
+  [PASS]  Query 'revenue growth' → 200  sources=['Q4 2024 Financial Report', ...]
+  [PASS]  Query 'salary' without pii_access → PII doc hidden
+  [PASS]  List docs → acme-corp only (2 visible, 1 PII hidden)
+
+▸ Tenant Isolation
+  [PASS]  acme-corp cannot see globex runbook
+  [PASS]  initech cannot see globex architecture doc
+
+▸ Role-Based Access Control
+  [PASS]  POST /ingest without 'editor' role → 403
+  [PASS]  DELETE without 'admin' role → 403
+
+17/17 passed
+```
+
+### 3. Run as a live server
+
+```bash
+CORESDK_USE_MOCK=true uvicorn 07_multitenant_rag:app --reload --port 8000
+```
+
+Try it:
+
+```bash
+# Health check (no auth required)
+curl http://localhost:8000/healthz
+
+# Query without a token → 401
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "revenue growth"}'
+
+# Query with a token (fail-open accepts any token when no sidecar)
+curl -X POST http://localhost:8000/query \
+  -H "Authorization: Bearer acme-token" \
+  -H "X-Tenant-ID: acme-corp" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "revenue growth"}'
+```
+
+### 4. Connect to a real sidecar
+
+```bash
+export CORESDK_SIDECAR_ADDR=localhost:50051
+export CORESDK_FAIL_MODE=open     # or "closed" to deny on sidecar error
+export CORESDK_JWKS_URI=https://your-idp.example/.well-known/jwks.json
+
+uvicorn 07_multitenant_rag:app --reload
+```
+
+With a real sidecar, tenant claims come from the validated JWT — not the `X-Tenant-ID` header.
+
+---
+
+## Code Walkthrough
+
+### Step 1 — One line of middleware
+
+```python
+from coresdk import SDK
+from coresdk.middleware.fastapi import CoreSDKMiddleware
+
+sdk = SDK.from_env()   # reads CORESDK_SIDECAR_ADDR, CORESDK_FAIL_MODE, etc.
+
+app = FastAPI()
+app.add_middleware(
+    CoreSDKMiddleware,
+    sdk=sdk,
+    exclude_paths=["/healthz", "/readyz", "/docs", "/openapi.json"],
+)
+```
+
+That's it for auth. Every request that hits a protected route has already been validated by the sidecar. The JWT claims — including `tenant_id` and `roles` — are attached to `request.state.coresdk_user`.
+
+### Step 2 — Tenant comes from claims, not the request
+
+```python
+def get_tenant(request: Request, claims: dict | None = None) -> str:
+    if claims:
+        t = claims.get("tenant_id", "")
+        if t:
+            return t
+    # Fail-open fallback: header only valid in dev mode
+    return request.headers.get("X-Tenant-ID", "unknown")
+```
+
+In production, `claims["tenant_id"]` is cryptographically signed in the JWT. An attacker cannot change it by modifying a header or URL parameter.
+
+### Step 3 — Scoped vector store search
+
+```python
+@app.post("/query")
+async def query(body: dict, request: Request):
+    claims = get_claims(request)
+    tenant_id = get_tenant(request, claims)           # from JWT
+
+    has_pii_access = "pii_access" in claims.get("roles", [])
+    docs = store.search(tenant_id, query, top_k=3, include_pii=has_pii_access)
+    #                   ^^^^^^^^^^^
+    #                   only searches this tenant's namespace
+```
+
+The vector store never searches across tenants. Even if someone crafted a request, the namespace key prevents cross-tenant leakage.
+
+### Step 4 — Role-based write access
+
+```python
+def require_role(role: str):
+    def _dep(request: Request):
+        claims = get_claims(request)
+        if role not in claims.get("roles", []):
+            raise HTTPException(status_code=403, detail={
+                "type": "https://askai.example/errors/forbidden",
+                "title": "Forbidden",
+                "status": 403,
+                "detail": f"Role '{role}' required.",
+            })
+        return claims
+    return _dep
+
+@app.post("/ingest")
+async def ingest(body: dict, request: Request,
+                 claims: dict = Depends(require_role("editor"))):
+    ...
+
+@app.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str, request: Request,
+                           claims: dict = Depends(require_role("admin"))):
+    ...
+```
+
+Roles come from the JWT claims. A viewer can query but not ingest. An admin can delete.
+
+### Step 5 — PII gating at retrieval
+
+```python
+# Documents flagged with contains_pii=True
+Document("acme-003", "Employee Salary Data 2024",
+    "Alice Johnson salary $210,000. SSN: 123-45-6789...",
+    tags=["hr", "confidential"],
+    contains_pii=True,   # ← hidden unless user has pii_access role
+)
+
+# At search time
+has_pii_access = "pii_access" in claims.get("roles", [])
+docs = store.search(tenant_id, query, include_pii=has_pii_access)
+```
+
+A user querying "employee salary" without `pii_access` gets an empty result — not a 403. This prevents enumeration attacks (attacker learns there's a salary document if they see a 403).
+
+### Step 6 — Fail-open vs fail-closed
+
+```python
+# In pyproject.toml or environment
+CORESDK_FAIL_MODE=open    # sidecar down → allow (default)
+CORESDK_FAIL_MODE=closed  # sidecar down → deny all
+```
+
+With `fail_mode=open`: if the sidecar is unreachable (deploy, restart, network blip), the service keeps running. The middleware logs a warning and passes requests through with empty claims.
+
+With `fail_mode=closed`: any sidecar outage returns 401 to all requests. Use this for high-security environments.
+
+---
+
+## Testing Strategy
+
+### Unit tests — MockSDK (no sidecar)
+
+```python
+from coresdk.testing import MockSDK
+
+sdk = MockSDK(default_allow=True)
+# Override specific tokens
+sdk.set_token_decision("admin-token", AuthDecision(
+    allowed=True,
+    claims=Claims(sub="alice", tenant_id="acme-corp", roles=["admin", "editor"]),
+    reason="",
+))
+
+# Use MockSDK in your app instead of the real SDK
+app.add_middleware(CoreSDKMiddleware, sdk=sdk)
+```
+
+### Integration tests — real sidecar
+
+```bash
+CORESDK_SIDECAR_ADDR=localhost:50051 pytest tests/
+```
+
+### The built-in harness
+
+```bash
+CORESDK_USE_MOCK=true python 07_multitenant_rag.py
+# Runs 17 assertions covering all personas and isolation guarantees
+```
+
+---
+
+## Replacing the fake LLM
+
+The example uses a keyword-matching stub. Swap in any LLM:
+
+```python
+# openai
+from openai import OpenAI
+client = OpenAI()
+
+def llm(query: str, docs: list[Document]) -> str:
+    context = "\n\n".join(f"[{d.title}]\n{d.content}" for d in docs)
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": f"Answer using only this context:\n{context}"},
+            {"role": "user", "content": query},
+        ]
+    )
+    return resp.choices[0].message.content
+
+# anthropic
+import anthropic
+client = anthropic.Anthropic()
+
+def llm(query: str, docs: list[Document]) -> str:
+    context = "\n\n".join(f"[{d.title}]\n{d.content}" for d in docs)
+    msg = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=1024,
+        system=f"Answer using only this context:\n{context}",
+        messages=[{"role": "user", "content": query}],
+    )
+    return msg.content[0].text
+```
+
+## Replacing the fake vector store
+
+```python
+# Pinecone
+import pinecone
+pc = pinecone.Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+index = pc.Index("askai")
+
+def ingest(tenant_id: str, doc: Document, embedding: list[float]):
+    index.upsert(vectors=[{
+        "id": doc.id,
+        "values": embedding,
+        "metadata": {"tenant_id": tenant_id, "title": doc.title, "pii": doc.contains_pii},
+    }], namespace=tenant_id)   # ← tenant namespace = isolation
+
+def search(tenant_id: str, query_embedding: list[float], include_pii: bool):
+    filter = {} if include_pii else {"pii": False}
+    return index.query(
+        vector=query_embedding,
+        top_k=3,
+        namespace=tenant_id,   # ← never crosses tenant boundary
+        filter=filter,
+    )
+```
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `CORESDK_SIDECAR_ADDR` | `localhost:50051` | gRPC sidecar address |
+| `CORESDK_FAIL_MODE` | `open` | `open` = allow on error, `closed` = deny |
+| `CORESDK_TENANT_ID` | `default` | Default tenant (overridden by JWT) |
+| `CORESDK_JWKS_URI` | — | IdP JWKS endpoint for real JWT validation |
+| `CORESDK_ENV` | `production` | `development` enables insecure channel |
+| `CORESDK_USE_MOCK` | `false` | `true` uses MockSDK (no sidecar needed) |
+
+---
+
+## Full Source
+
+→ [`examples/python/07_multitenant_rag.py`](https://github.com/coresdk-dev/examples/blob/main/python/07_multitenant_rag.py)
+
+```bash
+git clone https://github.com/coresdk-dev/examples
+cd examples/python
+CORESDK_USE_MOCK=true python 07_multitenant_rag.py
+```
