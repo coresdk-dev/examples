@@ -39,15 +39,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - name: Configure git for private modules
-        run: git config --global url."https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
       - run: |
           for d in go/*/; do
-            cd $d && go mod tidy && go vet ./... && cd ../..
+            # Skip examples that depend on private coresdk modules (require org access)
+            if grep -q "coresdk-dev" "$d/go.mod" 2>/dev/null; then
+              echo "Skipping $d (requires private github.com/coresdk-dev/* module)"
+              continue
+            fi
+            cd $d && go vet ./... && cd ../..
           done
-        env:
-          GOPRIVATE: "github.com/coresdk-dev/*"
-          GONOSUMDB: "github.com/coresdk-dev/*"
 
   rust:
     name: Rust examples
