@@ -34,9 +34,9 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from coresdk import CoreSDKClient, SDKConfig
+from coresdk.errors import ProblemDetailError
 from coresdk.middleware.fastapi import CoreSDKMiddleware
 from coresdk.tracing.decorator import trace
-from coresdk.errors._rfc9457 import ProblemDetailError
 
 # ── Load config ───────────────────────────────────────────────────────────────
 

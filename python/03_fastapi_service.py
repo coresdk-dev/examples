@@ -8,40 +8,22 @@ Full FastAPI service wired to the real sidecar:
   - RFC 9457 structured errors
 
 Run:
-    export CORESDK_SIDECAR_ADDR=[::1]:50051
+    export CORESDK_SIDECAR_ADDR=localhost:50051
     python 03_fastapi_service.py          # runs built-in test client
     uvicorn 03_fastapi_service:app --reload  # run as real server
 """
-import os
 import sys
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
-from coresdk._client import CoreSDKClient
-from coresdk._config import SDKConfig
+from coresdk import SDK
 from coresdk.middleware.fastapi import CoreSDKMiddleware
 from coresdk.tracing.decorator import trace
 
-SIDECAR = os.environ.get("CORESDK_SIDECAR_ADDR", "[::1]:50051")
-
 # ── Real SDK client → real sidecar ────────────────────────────────────────────
-_config = SDKConfig(
-    sidecar_addr=SIDECAR,
-    tenant_id="acme-corp",
-    service_name="document-service",
-    fail_mode="open",
-    dev_mode=False,
-)
-_client = CoreSDKClient(_config)
-
-# Adapter: middleware expects sdk.authorize() and sdk.config
-class SDKAdapter:
-    config = _config
-    def authorize(self, token, **kw):      return _client.validate_token(token, **kw)
-    def authorize_sync(self, token, **kw): return _client.validate_token(token, **kw)
-
-sdk = SDKAdapter()
+# Reads CORESDK_SIDECAR_ADDR (default localhost:50051), CORESDK_TENANT_ID, etc.
+sdk = SDK.from_env()
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="Document Service", version="1.0.0")
@@ -80,11 +62,22 @@ def require_role(role: str):
 async def healthz():
     return {"status": "ok"}
 
+@app.get("/items")
+async def list_items(request: Request):
+    user  = current_user(request)
+    sub   = user.get("sub", "anonymous")
+    rate  = sdk.check_rate_limit(f"user:{sub}")
+    if not rate.allowed:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    sdk.emit_audit_event(action="list_items", user_id=sub, outcome="success")
+    return {"items": [], "rate_remaining": rate.remaining}
+
+
 @app.get("/documents")
 @trace(intent="list-documents")
 async def list_documents(request: Request):
     user   = current_user(request)
-    tenant = user.get("tenant_id", _config.tenant_id)
+    tenant = user.get("tenant_id", sdk.config.tenant_id)
     docs   = _docs.get(tenant, {})
     return {
         "tenant":    tenant,
@@ -96,7 +89,7 @@ async def list_documents(request: Request):
 @trace(intent="get-document")
 async def get_document(doc_id: str, request: Request):
     user   = current_user(request)
-    tenant = user.get("tenant_id", _config.tenant_id)
+    tenant = user.get("tenant_id", sdk.config.tenant_id)
     doc    = _docs.get(tenant, {}).get(doc_id)
     if not doc:
         raise HTTPException(status_code=404, detail={
@@ -110,7 +103,7 @@ async def get_document(doc_id: str, request: Request):
 @app.post("/documents")
 @trace(intent="create-document")
 async def create_document(body: dict, claims=Depends(require_role("user"))):
-    tenant = claims.get("tenant_id", _config.tenant_id)
+    tenant = claims.get("tenant_id", sdk.config.tenant_id)
     doc_id = f"doc-{len(_docs.get(tenant, {})) + 10}"
     _docs.setdefault(tenant, {})[doc_id] = {
         "title":   body.get("title", "Untitled"),
@@ -122,7 +115,7 @@ async def create_document(body: dict, claims=Depends(require_role("user"))):
 @app.delete("/documents/{doc_id}")
 @trace(intent="delete-document")
 async def delete_document(doc_id: str, claims=Depends(require_role("admin"))):
-    tenant = claims.get("tenant_id", _config.tenant_id)
+    tenant = claims.get("tenant_id", sdk.config.tenant_id)
     if doc_id not in _docs.get(tenant, {}):
         raise HTTPException(status_code=404, detail={
             "type":   "https://coresdk.io/errors/not-found",

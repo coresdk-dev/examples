@@ -2,50 +2,74 @@
 CoreSDK — Example 01: Quickstart
 =================================
 The minimum code to get started. Connects to the real sidecar,
-validates a token, evaluates a policy.
+validates a token, evaluates a policy, checks a rate limit, and more.
 
 Run:
     pip install coresdk
-    export CORESDK_SIDECAR_ADDR=[::1]:50051
+    export CORESDK_SIDECAR_ADDR=localhost:50051
     python 01_quickstart.py
 """
-import os
 
-from coresdk._client import CoreSDKClient
-from coresdk._config import SDKConfig
+from coresdk import SDK
 
-# ── Connect to real sidecar ───────────────────────────────────────────────────
-sdk = CoreSDKClient(SDKConfig(
-    sidecar_addr=os.environ.get("CORESDK_SIDECAR_ADDR", "[::1]:50051"),
-    tenant_id="my-company",
-    service_name="my-api",
-    fail_mode="open",
-))
+# ── Connect to sidecar via environment variables ──────────────────────────────
+# Reads: CORESDK_SIDECAR_ADDR (default localhost:50051)
+#        CORESDK_TENANT_ID    (default "default")
+#        CORESDK_FAIL_MODE    (default "open")
+sdk = SDK.from_env()
 
-print("CoreSDK Quickstart\n" + "="*40)
+print("CoreSDK Quickstart")
+print("=" * 40)
 
-# ── Validate a token ──────────────────────────────────────────────────────────
+# ── 1. Authorize a token ──────────────────────────────────────────────────────
 # No JWKS configured → sidecar returns fail-open (allowed=True)
-# Set CORESDK_JWKS_URL=https://your-idp/.well-known/jwks.json for real JWT validation
-decision = sdk.validate_token("my-service-token", action="read", resource="reports/q4")
+# Set CORESDK_JWKS_URI=https://your-idp/.well-known/jwks.json for real JWT validation
+token = "my-service-token"
+decision = sdk.authorize(token, action="read", resource="reports/q4")
 
-print(f"\nToken validation:")
-print(f"  allowed : {decision.allowed}")
-print(f"  reason  : {decision.reason!r}")
-print(f"  claims  : {decision.claims}")
+print(f"\n1. authorize()")
+print(f"   allowed : {decision.allowed}")
+print(f"   reason  : {decision.reason!r}")
+print(f"   claims  : {decision.claims}")
 
-# ── Evaluate a policy ─────────────────────────────────────────────────────────
+# ── 2. Evaluate a policy ──────────────────────────────────────────────────────
 # No Rego bundle loaded → sidecar returns fail-open (True)
-# Load .rego files via CORESDK_POLICY_DIR=/etc/coresdk/policy for real evaluation
+# Load .rego files via control plane or CORESDK_POLICY_DIR for real evaluation
 allowed = sdk.evaluate_policy("data.authz.allow", {
-    "tenant_id": "my-company",
-    "subject":   "alice",
-    "action":    "read",
-    "resource":  "reports/q4",
-    "context":   {},
+    "subject":  "alice",
+    "action":   "read",
+    "resource": "reports/q4",
 })
 
-print(f"\nPolicy evaluation:")
-print(f"  data.authz.allow → {allowed}")
+print(f"\n2. evaluate_policy()")
+print(f"   data.authz.allow -> {allowed}")
 
-print("\n✓ SDK connected and working — sidecar is live.")
+# ── 3. Rate limiting ──────────────────────────────────────────────────────────
+rate = sdk.check_rate_limit("user:alice")
+
+print(f"\n3. check_rate_limit()")
+print(f"   allowed   : {rate.allowed}")
+print(f"   remaining : {rate.remaining}")
+
+# ── 4. Feature flags ──────────────────────────────────────────────────────────
+flag = sdk.evaluate_flag("new_dashboard", user_id="alice")
+
+print(f"\n4. evaluate_flag()")
+print(f"   enabled : {flag.enabled}")
+print(f"   variant : {flag.variant!r}")
+
+# ── 5. License entitlement ────────────────────────────────────────────────────
+lic = sdk.check_entitlement("sso")
+
+print(f"\n5. check_entitlement()")
+print(f"   entitled : {lic.entitled}")
+print(f"   plan     : {lic.plan!r}")
+
+# ── 6. Token revocation ───────────────────────────────────────────────────────
+sdk.revoke_token(token, reason="user-logout")
+revoked = sdk.is_revoked(token)
+
+print(f"\n6. revoke_token() / is_revoked()")
+print(f"   is_revoked : {revoked}")
+
+print("\n--- SDK connected and working ---")

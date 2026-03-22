@@ -33,9 +33,9 @@ from pathlib import Path
 from flask import Flask, g, jsonify, request
 
 from coresdk import CoreSDKClient, SDKConfig
+from coresdk.errors import ProblemDetailError
 from coresdk.middleware.flask import CoreSDKMiddleware
 from coresdk.tracing.decorator import trace
-from coresdk.errors._rfc9457 import ProblemDetail, ProblemDetailError
 
 # ── Load config ───────────────────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ def require_role(role: str):
         def wrapper(*args, **kwargs):
             user = current_user()
             if role not in user.get("roles", []):
-                return jsonify(ProblemDetail(
+                return jsonify(ProblemDetailError(
                     type_uri="https://coresdk.io/errors/forbidden",
                     title="Forbidden",
                     status=403,
@@ -111,7 +111,7 @@ def require_auth(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         if not hasattr(g, "claims") or g.claims is None:
-            return jsonify(ProblemDetail(
+            return jsonify(ProblemDetailError(
                 type_uri="https://coresdk.io/errors/unauthorized",
                 title="Unauthorized",
                 status=401,
@@ -182,7 +182,7 @@ def get_product(product_id: int):
     products = _db.get(tenant, [])
     product  = next((p for p in products if p["id"] == product_id), None)
     if not product:
-        problem = ProblemDetail(
+        problem = ProblemDetailError(
             type_uri="https://coresdk.io/errors/not-found",
             title="Not Found",
             status=404,
@@ -197,10 +197,21 @@ def get_product(product_id: int):
 @require_role("editor")
 @trace(intent="create-product")
 def create_product():
-    """Create a product — requires 'editor' role."""
+    """Create a product — requires 'editor' role, enforces rate limit, emits audit event."""
     body   = request.get_json(force=True) or {}
     tenant = get_tenant()
     user   = current_user()
+
+    # Rate limiting: prevent abuse of write endpoints
+    rate = _sdk.check_rate_limit(f"create_product:{user.get('sub', '')}", tenant_id=tenant)
+    if not rate.allowed:
+        return jsonify({
+            "type":   "https://coresdk.io/errors/rate-limited",
+            "title":  "Too Many Requests",
+            "status": 429,
+            "detail": f"Rate limit exceeded. Retry after {rate.retry_after_seconds}s.",
+        }), 429, {"Content-Type": "application/problem+json"}
+
     items  = _db.setdefault(tenant, [])
     new_id = max((p["id"] for p in items), default=0) + 1
     product = {
@@ -210,6 +221,18 @@ def create_product():
         "owner": user.get("sub", "unknown"),
     }
     items.append(product)
+
+    # Audit: emit a tamper-evident record for every create
+    _sdk.emit_audit_event(
+        action="product.created",
+        resource_type="product",
+        resource_id=str(new_id),
+        tenant_id=tenant,
+        user_id=user.get("sub", "unknown"),
+        outcome="success",
+        metadata={"name": product["name"], "price": product["price"]},
+    )
+
     return jsonify({"created": product}), 201
 
 
@@ -223,7 +246,7 @@ def delete_product(product_id: int):
     products = _db.get(tenant, [])
     product  = next((p for p in products if p["id"] == product_id), None)
     if not product:
-        problem = ProblemDetail(
+        problem = ProblemDetailError(
             type_uri="https://coresdk.io/errors/not-found",
             title="Not Found",
             status=404,

@@ -7,13 +7,16 @@ no PII ever reaches your observability backend.
 CoreSDK's SpanProcessor masks sensitive attributes before export —
 emails, tokens, API keys, SSNs, credit card numbers, JWTs.
 
+Also demonstrates local PII masking via coresdk.masking — no sidecar needed.
+
 Run:
     python 06_pii_safe_tracing.py
 """
 import sys
 
+from coresdk.masking import MaskingConfig, mask_dict, mask_string
 from coresdk.tracing.decorator import trace
-from coresdk.tracing.processor import mask_attributes, mask_value, REDACTED
+from coresdk.tracing.processor import REDACTED, mask_attributes, mask_value
 from coresdk.testing._mock import assert_no_pii
 
 RESET = "\033[0m"; GREEN = "\033[32m"; RED = "\033[31m"
@@ -160,6 +163,47 @@ all_unsafe_ok = all(unsafe_masked[k] == REDACTED for k in unsafe_patterns)
 
 check("Safe ID patterns pass through unmasked",     all_safe_ok)
 check("Sensitive patterns all redacted before export", all_unsafe_ok)
+
+# ── 6. Local masking — no sidecar needed ─────────────────────────────────────
+print(f"\n{BOLD}6. Local masking (coresdk.masking){RESET}")
+
+# mask_dict: recursively redacts PII in a dict — use before logging or storing
+user_profile = {
+    "name": "Alice Smith",
+    "email": "alice@company.com",
+    "ssn": "123-45-6789",
+    "credit_card": "4111-1111-1111-1111",
+    "notes": "Normal customer",
+}
+safe_profile = mask_dict(user_profile)
+
+check("mask_dict: name preserved",          safe_profile["name"] == "Alice Smith", safe_profile["name"])
+check("mask_dict: email redacted",          safe_profile["email"] == REDACTED,     safe_profile["email"])
+check("mask_dict: ssn redacted",            safe_profile["ssn"] == REDACTED,       safe_profile["ssn"])
+check("mask_dict: credit_card redacted",    safe_profile["credit_card"] == REDACTED, safe_profile["credit_card"])
+check("mask_dict: notes (safe) preserved",  safe_profile["notes"] == "Normal customer", safe_profile["notes"])
+
+# mask_string: inline substitution — PII replaced in-place, context kept
+raw_log = "User alice@company.com called from SSN 123-45-6789"
+safe_log = mask_string(raw_log)
+check("mask_string: email replaced in text", "alice@company.com" not in safe_log, safe_log[:60])
+check("mask_string: SSN replaced in text",   "123-45-6789" not in safe_log,       safe_log[:60])
+check("mask_string: surrounding text kept",  "User" in safe_log and "called" in safe_log, safe_log[:60])
+
+# Custom patterns via MaskingConfig
+config = MaskingConfig(extra_patterns=[r"CUST-\d{6}"])
+safe_custom = mask_string("Customer CUST-123456 called", config=config)
+check("mask_string: custom pattern redacted",  "CUST-123456" not in safe_custom, safe_custom)
+check("mask_string: custom pattern: context kept", "Customer" in safe_custom, safe_custom)
+
+# Allowlist mode — only explicitly safe fields pass through
+al_config  = MaskingConfig(allowlist_mode=True, allowlist={"tenant_id", "order_id"})
+mixed_data = {"tenant_id": "acme-corp", "order_id": "ord-99", "email": "x@y.com", "ssn": "000-00-0000"}
+safe_al    = mask_dict(mixed_data, config=al_config)
+check("mask_dict allowlist: tenant_id kept",   safe_al["tenant_id"] == "acme-corp", safe_al["tenant_id"])
+check("mask_dict allowlist: order_id kept",    safe_al["order_id"] == "ord-99",     safe_al["order_id"])
+check("mask_dict allowlist: email redacted",   safe_al["email"] == REDACTED,        safe_al["email"])
+check("mask_dict allowlist: ssn redacted",     safe_al["ssn"] == REDACTED,          safe_al["ssn"])
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 passed = sum(1 for _, ok in results if ok)

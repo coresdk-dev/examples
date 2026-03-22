@@ -215,3 +215,36 @@ def policy_check(request):
         "resource": resource,
         "allowed":  result,
     })
+
+
+@require_http_methods(["GET"])
+@trace(intent="rate-limit-status")
+def rate_limit_status(request):
+    """
+    GET /rate-limit?key=<key>
+    Check a rate limit for the authenticated user.
+
+    Shows how to call check_rate_limit() directly for per-user or per-endpoint
+    throttling without blocking the request — useful for surfacing quota info to
+    the client (e.g. X-RateLimit-* headers) or for soft-limiting expensive ops.
+
+    Example:
+        curl -H "Authorization: Bearer <token>" \
+             "http://localhost:8000/rate-limit?key=search"
+    """
+    key    = request.GET.get("key", "default")
+    user   = _current_user(request)
+    tenant = _get_tenant(request)
+
+    # Construct a per-user, per-key rate-limit identifier
+    rate_key = f"{key}:{user.get('sub', 'anonymous')}"
+    rate = _sdk.check_rate_limit(rate_key, tenant_id=tenant)
+
+    return JsonResponse({
+        "tenant":               tenant,
+        "subject":              user.get("sub"),
+        "key":                  rate_key,
+        "allowed":              rate.allowed,
+        "remaining":            rate.remaining,
+        "retry_after_seconds":  rate.retry_after_seconds,
+    }, status=200 if rate.allowed else 429)
