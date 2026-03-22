@@ -11,6 +11,7 @@ Implements all CoreSDK features matching the fastapi-app:
   - RFC 9457 structured error responses
   - Config from coresdk.toml + env var overrides
 """
+
 import functools
 import json
 
@@ -23,23 +24,25 @@ from coresdk.tracing.decorator import trace
 
 # ── SDK client ────────────────────────────────────────────────────────────────
 
-_cfg     = settings.CORESDK
+_cfg = settings.CORESDK
 _sdk_cfg = _cfg["sdk"]
 TENANTS: dict = _cfg["tenants"]
 
-_sdk = CoreSDKClient(SDKConfig(
-    sidecar_addr = _sdk_cfg["sidecar_addr"],
-    tenant_id    = _sdk_cfg["tenant_id"],
-    service_name = _sdk_cfg["service_name"],
-    fail_mode    = _sdk_cfg["fail_mode"],
-    dev_mode     = _sdk_cfg["dev_mode"],
-))
+_sdk = CoreSDKClient(
+    SDKConfig(
+        sidecar_addr=_sdk_cfg["sidecar_addr"],
+        tenant_id=_sdk_cfg["tenant_id"],
+        service_name=_sdk_cfg["service_name"],
+        fail_mode=_sdk_cfg["fail_mode"],
+        dev_mode=_sdk_cfg["dev_mode"],
+    )
+)
 
 # ── In-memory store (replace with your DB) ────────────────────────────────────
 
 _db: dict[str, list[dict]] = {
     "acme-corp": [
-        {"id": 1, "name": "Widget A", "price": 99.00,  "owner": "alice"},
+        {"id": 1, "name": "Widget A", "price": 99.00, "owner": "alice"},
         {"id": 2, "name": "Widget B", "price": 149.00, "owner": "alice"},
     ],
     "globex": [
@@ -48,6 +51,7 @@ _db: dict[str, list[dict]] = {
 }
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _current_user(request) -> dict:
     """Extract JWT claims set by CoreSDKMiddleware (stored as request.coresdk_claims)."""
@@ -65,8 +69,8 @@ def _get_tenant(request) -> str:
 def _problem(status: int, title: str, detail: str, type_: str = None) -> JsonResponse:
     """Return an RFC 9457 Problem Detail response."""
     body = {
-        "type":   type_ or f"https://coresdk.io/errors/{title.lower().replace(' ', '-')}",
-        "title":  title,
+        "type": type_ or f"https://coresdk.io/errors/{title.lower().replace(' ', '-')}",
+        "title": title,
         "status": status,
         "detail": detail,
     }
@@ -75,6 +79,7 @@ def _problem(status: int, title: str, detail: str, type_: str = None) -> JsonRes
 
 def require_role(role: str):
     """Decorator: return 403 if the authenticated user lacks `role`."""
+
     def decorator(view_func):
         @functools.wraps(view_func)
         def wrapper(request, *args, **kwargs):
@@ -87,10 +92,14 @@ def require_role(role: str):
                     type_="https://coresdk.io/errors/forbidden",
                 )
             return view_func(request, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
+
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @require_http_methods(["GET"])
 def healthz(request):
@@ -119,27 +128,29 @@ def products(request):
 
 def _list_products(request):
     tenant = _get_tenant(request)
-    user   = _current_user(request)
-    return JsonResponse({
-        "tenant":   tenant,
-        "user":     user.get("sub"),
-        "products": _db.get(tenant, []),
-    })
+    user = _current_user(request)
+    return JsonResponse(
+        {
+            "tenant": tenant,
+            "user": user.get("sub"),
+            "products": _db.get(tenant, []),
+        }
+    )
 
 
 @require_role("editor")
 def _create_product(request):
     tenant = _get_tenant(request)
-    user   = _current_user(request)
+    user = _current_user(request)
     try:
         body = json.loads(request.body or b"{}")
     except json.JSONDecodeError:
         return _problem(400, "Bad Request", "Request body must be valid JSON.")
-    items  = _db.setdefault(tenant, [])
+    items = _db.setdefault(tenant, [])
     new_id = max((p["id"] for p in items), default=0) + 1
     product = {
-        "id":    new_id,
-        "name":  body.get("name", "Unnamed"),
+        "id": new_id,
+        "name": body.get("name", "Unnamed"),
         "price": body.get("price", 0.0),
         "owner": user.get("sub", "unknown"),
     }
@@ -160,9 +171,9 @@ def product_detail(request, pk: int):
 
 
 def _get_product(request, pk: int):
-    tenant   = _get_tenant(request)
+    tenant = _get_tenant(request)
     products = _db.get(tenant, [])
-    product  = next((p for p in products if p["id"] == pk), None)
+    product = next((p for p in products if p["id"] == pk), None)
     if not product:
         return _problem(
             404,
@@ -175,9 +186,9 @@ def _get_product(request, pk: int):
 
 @require_role("admin")
 def _delete_product(request, pk: int):
-    tenant   = _get_tenant(request)
+    tenant = _get_tenant(request)
     products = _db.get(tenant, [])
-    product  = next((p for p in products if p["id"] == pk), None)
+    product = next((p for p in products if p["id"] == pk), None)
     if not product:
         return _problem(
             404,
@@ -196,25 +207,30 @@ def policy_check(request):
     GET /policy/check?action=X&resource=Y
     Evaluate a Rego policy rule — shows how to call evaluate_policy() directly.
     """
-    action   = request.GET.get("action", "")
+    action = request.GET.get("action", "")
     resource = request.GET.get("resource", "")
-    user     = _current_user(request)
-    tenant   = _get_tenant(request)
+    user = _current_user(request)
+    tenant = _get_tenant(request)
 
-    result = _sdk.evaluate_policy("data.authz.allow", {
-        "tenant_id": tenant,
-        "subject":   user.get("sub"),
-        "action":    action,
-        "resource":  resource,
-        "context":   {"roles": user.get("roles", [])},
-    })
-    return JsonResponse({
-        "tenant":   tenant,
-        "subject":  user.get("sub"),
-        "action":   action,
-        "resource": resource,
-        "allowed":  result,
-    })
+    result = _sdk.evaluate_policy(
+        "data.authz.allow",
+        {
+            "tenant_id": tenant,
+            "subject": user.get("sub"),
+            "action": action,
+            "resource": resource,
+            "context": {"roles": user.get("roles", [])},
+        },
+    )
+    return JsonResponse(
+        {
+            "tenant": tenant,
+            "subject": user.get("sub"),
+            "action": action,
+            "resource": resource,
+            "allowed": result,
+        }
+    )
 
 
 @require_http_methods(["GET"])
@@ -232,19 +248,22 @@ def rate_limit_status(request):
         curl -H "Authorization: Bearer <token>" \
              "http://localhost:8000/rate-limit?key=search"
     """
-    key    = request.GET.get("key", "default")
-    user   = _current_user(request)
+    key = request.GET.get("key", "default")
+    user = _current_user(request)
     tenant = _get_tenant(request)
 
     # Construct a per-user, per-key rate-limit identifier
     rate_key = f"{key}:{user.get('sub', 'anonymous')}"
     rate = _sdk.check_rate_limit(rate_key, tenant_id=tenant)
 
-    return JsonResponse({
-        "tenant":               tenant,
-        "subject":              user.get("sub"),
-        "key":                  rate_key,
-        "allowed":              rate.allowed,
-        "remaining":            rate.remaining,
-        "retry_after_seconds":  rate.retry_after_seconds,
-    }, status=200 if rate.allowed else 429)
+    return JsonResponse(
+        {
+            "tenant": tenant,
+            "subject": user.get("sub"),
+            "key": rate_key,
+            "allowed": rate.allowed,
+            "remaining": rate.remaining,
+            "retry_after_seconds": rate.retry_after_seconds,
+        },
+        status=200 if rate.allowed else 429,
+    )

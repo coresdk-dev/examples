@@ -27,7 +27,7 @@ print("=" * 40)
 token = "my-service-token"
 decision = sdk.authorize(token, action="read", resource="reports/q4")
 
-print(f"\n1. authorize()")
+print("\n1. authorize()")
 print(f"   allowed : {decision.allowed}")
 print(f"   reason  : {decision.reason!r}")
 print(f"   claims  : {decision.claims}")
@@ -35,33 +35,36 @@ print(f"   claims  : {decision.claims}")
 # ── 2. Evaluate a policy ──────────────────────────────────────────────────────
 # No Rego bundle loaded → sidecar returns fail-open (True)
 # Load .rego files via control plane or CORESDK_POLICY_DIR for real evaluation
-allowed = sdk.evaluate_policy("data.authz.allow", {
-    "subject":  "alice",
-    "action":   "read",
-    "resource": "reports/q4",
-})
+allowed = sdk.evaluate_policy(
+    "data.authz.allow",
+    {
+        "subject": "alice",
+        "action": "read",
+        "resource": "reports/q4",
+    },
+)
 
-print(f"\n2. evaluate_policy()")
+print("\n2. evaluate_policy()")
 print(f"   data.authz.allow -> {allowed}")
 
 # ── 3. Rate limiting ──────────────────────────────────────────────────────────
 rate = sdk.check_rate_limit("user:alice")
 
-print(f"\n3. check_rate_limit()")
+print("\n3. check_rate_limit()")
 print(f"   allowed   : {rate.allowed}")
 print(f"   remaining : {rate.remaining}")
 
 # ── 4. Feature flags ──────────────────────────────────────────────────────────
 flag = sdk.evaluate_flag("new_dashboard", user_id="alice")
 
-print(f"\n4. evaluate_flag()")
+print("\n4. evaluate_flag()")
 print(f"   enabled : {flag.enabled}")
 print(f"   variant : {flag.variant!r}")
 
 # ── 5. License entitlement ────────────────────────────────────────────────────
 lic = sdk.check_entitlement("sso")
 
-print(f"\n5. check_entitlement()")
+print("\n5. check_entitlement()")
 print(f"   entitled : {lic.entitled}")
 print(f"   plan     : {lic.plan!r}")
 
@@ -69,7 +72,7 @@ print(f"   plan     : {lic.plan!r}")
 sdk.revoke_token(token, reason="user-logout")
 revoked = sdk.is_revoked(token)
 
-print(f"\n6. revoke_token() / is_revoked()")
+print("\n6. revoke_token() / is_revoked()")
 print(f"   is_revoked : {revoked}")
 
 print("\n--- SDK connected and working ---")

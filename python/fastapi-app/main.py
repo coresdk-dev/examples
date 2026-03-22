@@ -25,6 +25,7 @@ Run:
     # Test (with token → 200, fail-open without real JWKS)
     curl -H "Authorization: Bearer alice-token" http://localhost:8000/products
 """
+
 import os
 import tomllib
 from pathlib import Path
@@ -40,6 +41,7 @@ from coresdk.tracing.decorator import trace
 
 # ── Load config ───────────────────────────────────────────────────────────────
 
+
 def load_config() -> dict:
     """Load coresdk.toml, with env var overrides."""
     config_path = Path(__file__).parent / "coresdk.toml"
@@ -47,12 +49,15 @@ def load_config() -> dict:
         cfg = tomllib.load(f)
     # Allow env var overrides for any sdk.* key
     sdk = cfg["sdk"]
-    sdk["sidecar_addr"]  = os.getenv("CORESDK_SIDECAR_ADDR",  sdk["sidecar_addr"])
-    sdk["tenant_id"]     = os.getenv("CORESDK_TENANT_ID",     sdk["tenant_id"])
-    sdk["service_name"]  = os.getenv("CORESDK_SERVICE_NAME",  sdk["service_name"])
-    sdk["fail_mode"]     = os.getenv("CORESDK_FAIL_MODE",     sdk["fail_mode"])
-    sdk["dev_mode"]      = os.getenv("CORESDK_DEV_MODE", str(sdk["dev_mode"])).lower() == "true"
+    sdk["sidecar_addr"] = os.getenv("CORESDK_SIDECAR_ADDR", sdk["sidecar_addr"])
+    sdk["tenant_id"] = os.getenv("CORESDK_TENANT_ID", sdk["tenant_id"])
+    sdk["service_name"] = os.getenv("CORESDK_SERVICE_NAME", sdk["service_name"])
+    sdk["fail_mode"] = os.getenv("CORESDK_FAIL_MODE", sdk["fail_mode"])
+    sdk["dev_mode"] = (
+        os.getenv("CORESDK_DEV_MODE", str(sdk["dev_mode"])).lower() == "true"
+    )
     return cfg
+
 
 cfg = load_config()
 sdk_cfg = cfg["sdk"]
@@ -60,21 +65,31 @@ TENANTS: dict = cfg["tenants"]
 
 # ── SDK client ────────────────────────────────────────────────────────────────
 
-_sdk = CoreSDKClient(SDKConfig(
-    sidecar_addr = sdk_cfg["sidecar_addr"],
-    tenant_id    = sdk_cfg["tenant_id"],
-    service_name = sdk_cfg["service_name"],
-    fail_mode    = sdk_cfg["fail_mode"],
-    dev_mode     = sdk_cfg["dev_mode"],
-))
+_sdk = CoreSDKClient(
+    SDKConfig(
+        sidecar_addr=sdk_cfg["sidecar_addr"],
+        tenant_id=sdk_cfg["tenant_id"],
+        service_name=sdk_cfg["service_name"],
+        fail_mode=sdk_cfg["fail_mode"],
+        dev_mode=sdk_cfg["dev_mode"],
+    )
+)
+
 
 class SDKAdapter:
     """Thin adapter — middleware expects .authorize() and .config."""
+
     config = _sdk.config
-    def authorize(self, token, **kw):      return _sdk.validate_token(token, **kw)
-    def authorize_sync(self, token, **kw): return _sdk.validate_token(token, **kw)
+
+    def authorize(self, token, **kw):
+        return _sdk.validate_token(token, **kw)
+
+    def authorize_sync(self, token, **kw):
+        return _sdk.validate_token(token, **kw)
+
 
 # ── App setup ─────────────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -83,6 +98,7 @@ async def lifespan(app: FastAPI):
     print(f"  service : {sdk_cfg['service_name']}")
     print(f"  tenants : {list(TENANTS.keys())}")
     yield
+
 
 app = FastAPI(
     title="Product API",
@@ -100,6 +116,7 @@ app.add_middleware(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def current_user(request: Request) -> dict:
     """Extract JWT claims set by CoreSDKMiddleware."""
     user = getattr(request.state, "coresdk_user", None)
@@ -108,36 +125,54 @@ def current_user(request: Request) -> dict:
     # fail-open: sidecar allowed but no real JWT — use tenant default
     return {"sub": "anonymous", "roles": [], "tenant_id": sdk_cfg["tenant_id"]}
 
+
 def get_tenant(request: Request) -> str:
     return current_user(request).get("tenant_id") or sdk_cfg["tenant_id"]
 
+
 def require_role(role: str):
     """Dependency: raise 403 if the authenticated user lacks `role`."""
+
     def _check(request: Request):
         user = current_user(request)
         if role not in user.get("roles", []):
-            raise HTTPException(status_code=403, detail={
-                "type":   "https://coresdk.io/errors/forbidden",
-                "title":  "Forbidden",
-                "status": 403,
-                "detail": f"Role '{role}' required. Your roles: {user.get('roles', [])}",
-            })
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "type": "https://coresdk.io/errors/forbidden",
+                    "title": "Forbidden",
+                    "status": 403,
+                    "detail": f"Role '{role}' required. Your roles: {user.get('roles', [])}",
+                },
+            )
         return user
+
     return Depends(_check)
+
 
 # ── In-memory store (replace with your DB) ────────────────────────────────────
 
 # ABAC docs store — each document has an owner and classification
 _docs: dict[str, list[dict]] = {
     "acme-corp": [
-        {"id": "doc-1", "title": "Q4 Report", "owner": "alice", "classification": "internal"},
-        {"id": "doc-2", "title": "Budget", "owner": "bob", "classification": "confidential"},
+        {
+            "id": "doc-1",
+            "title": "Q4 Report",
+            "owner": "alice",
+            "classification": "internal",
+        },
+        {
+            "id": "doc-2",
+            "title": "Budget",
+            "owner": "bob",
+            "classification": "confidential",
+        },
     ],
 }
 
 _db: dict[str, list[dict]] = {
     "acme-corp": [
-        {"id": 1, "name": "Widget A", "price": 99.00,  "owner": "alice"},
+        {"id": 1, "name": "Widget A", "price": 99.00, "owner": "alice"},
         {"id": 2, "name": "Widget B", "price": 149.00, "owner": "alice"},
     ],
     "globex": [
@@ -146,6 +181,7 @@ _db: dict[str, list[dict]] = {
 }
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @app.get("/healthz", tags=["ops"])
 async def healthz():
@@ -164,9 +200,7 @@ async def me(request: Request):
 @trace(intent="list-tenants")
 async def list_tenants(_=require_role("admin")):
     """Admin only — list all configured tenants."""
-    return {"tenants": [
-        {"slug": slug, **info} for slug, info in TENANTS.items()
-    ]}
+    return {"tenants": [{"slug": slug, **info} for slug, info in TENANTS.items()]}
 
 
 @app.get("/products", tags=["products"])
@@ -174,10 +208,10 @@ async def list_tenants(_=require_role("admin")):
 async def list_products(request: Request):
     """List products scoped to the authenticated user's tenant."""
     tenant = get_tenant(request)
-    user   = current_user(request)
+    user = current_user(request)
     return {
-        "tenant":   tenant,
-        "user":     user.get("sub"),
+        "tenant": tenant,
+        "user": user.get("sub"),
         "products": _db.get(tenant, []),
     }
 
@@ -186,16 +220,19 @@ async def list_products(request: Request):
 @trace(intent="get-product")
 async def get_product(product_id: int, request: Request):
     """Get a single product — scoped to the caller's tenant."""
-    tenant   = get_tenant(request)
+    tenant = get_tenant(request)
     products = _db.get(tenant, [])
-    product  = next((p for p in products if p["id"] == product_id), None)
+    product = next((p for p in products if p["id"] == product_id), None)
     if not product:
-        raise HTTPException(status_code=404, detail={
-            "type":   "https://coresdk.io/errors/not-found",
-            "title":  "Not Found",
-            "status": 404,
-            "detail": f"Product {product_id} not found in tenant '{tenant}'",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "type": "https://coresdk.io/errors/not-found",
+                "title": "Not Found",
+                "status": 404,
+                "detail": f"Product {product_id} not found in tenant '{tenant}'",
+            },
+        )
     return product
 
 
@@ -204,12 +241,12 @@ async def get_product(product_id: int, request: Request):
 async def create_product(body: dict, request: Request, _=require_role("editor")):
     """Create a product — requires 'editor' role."""
     tenant = get_tenant(request)
-    user   = current_user(request)
-    items  = _db.setdefault(tenant, [])
+    user = current_user(request)
+    items = _db.setdefault(tenant, [])
     new_id = max((p["id"] for p in items), default=0) + 1
     product = {
-        "id":    new_id,
-        "name":  body.get("name", "Unnamed"),
+        "id": new_id,
+        "name": body.get("name", "Unnamed"),
         "price": body.get("price", 0.0),
         "owner": user.get("sub", "unknown"),
     }
@@ -221,16 +258,19 @@ async def create_product(body: dict, request: Request, _=require_role("editor"))
 @trace(intent="delete-product")
 async def delete_product(product_id: int, request: Request, _=require_role("admin")):
     """Delete a product — requires 'admin' role."""
-    tenant   = get_tenant(request)
+    tenant = get_tenant(request)
     products = _db.get(tenant, [])
-    product  = next((p for p in products if p["id"] == product_id), None)
+    product = next((p for p in products if p["id"] == product_id), None)
     if not product:
-        raise HTTPException(status_code=404, detail={
-            "type":   "https://coresdk.io/errors/not-found",
-            "title":  "Not Found",
-            "status": 404,
-            "detail": f"Product {product_id} not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "type": "https://coresdk.io/errors/not-found",
+                "title": "Not Found",
+                "status": 404,
+                "detail": f"Product {product_id} not found",
+            },
+        )
     _db[tenant] = [p for p in products if p["id"] != product_id]
     return {"deleted": product_id}
 
@@ -248,27 +288,38 @@ async def get_document_abac(doc_id: str, request: Request):
     docs = _docs.get(tenant, [])
     doc = next((d for d in docs if d["id"] == doc_id), None)
     if not doc:
-        raise HTTPException(status_code=404, detail={
-            "type": "https://coresdk.io/errors/not-found",
-            "title": "Not Found", "status": 404,
-            "detail": f"Document {doc_id} not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "type": "https://coresdk.io/errors/not-found",
+                "title": "Not Found",
+                "status": 404,
+                "detail": f"Document {doc_id} not found",
+            },
+        )
     # ABAC: evaluate policy with resource attributes
-    allowed = _sdk.evaluate_policy("data.authz.allow", {
-        "tenant_id": tenant,
-        "subject": user.get("sub"),
-        "action": "read",
-        "resource": f"documents/{doc_id}",
-        "resource_owner": doc["owner"],
-        "resource_tenant": tenant,
-        "context": {"roles": user.get("roles", [])},
-    })
+    allowed = _sdk.evaluate_policy(
+        "data.authz.allow",
+        {
+            "tenant_id": tenant,
+            "subject": user.get("sub"),
+            "action": "read",
+            "resource": f"documents/{doc_id}",
+            "resource_owner": doc["owner"],
+            "resource_tenant": tenant,
+            "context": {"roles": user.get("roles", [])},
+        },
+    )
     if not allowed:
-        raise HTTPException(status_code=403, detail={
-            "type": "https://coresdk.io/errors/forbidden",
-            "title": "Forbidden", "status": 403,
-            "detail": f"Access denied to document {doc_id}",
-        })
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "type": "https://coresdk.io/errors/forbidden",
+                "title": "Forbidden",
+                "status": 403,
+                "detail": f"Access denied to document {doc_id}",
+            },
+        )
     return doc
 
 
@@ -279,27 +330,34 @@ async def policy_check(action: str, resource: str, request: Request):
     Evaluate a Rego policy rule directly.
     Shows how to call evaluate_policy() from your own business logic.
     """
-    user   = current_user(request)
+    user = current_user(request)
     tenant = get_tenant(request)
-    result = _sdk.evaluate_policy("data.authz.allow", {
-        "tenant_id": tenant,
-        "subject":   user.get("sub"),
-        "action":    action,
-        "resource":  resource,
-        "context":   {"roles": user.get("roles", [])},
-    })
+    result = _sdk.evaluate_policy(
+        "data.authz.allow",
+        {
+            "tenant_id": tenant,
+            "subject": user.get("sub"),
+            "action": action,
+            "resource": resource,
+            "context": {"roles": user.get("roles", [])},
+        },
+    )
     return {
-        "tenant":   tenant,
-        "subject":  user.get("sub"),
-        "action":   action,
+        "tenant": tenant,
+        "subject": user.get("sub"),
+        "action": action,
         "resource": resource,
-        "allowed":  result,
+        "allowed": result,
     }
 
 
 # ── RFC 9457 error handler ────────────────────────────────────────────────────
 
+
 @app.exception_handler(ProblemDetailError)
 async def problem_detail_handler(request: Request, exc: ProblemDetailError):
-    return JSONResponse(status_code=exc.status, content=exc.to_dict(),
-                        media_type="application/problem+json")
+    return JSONResponse(
+        status_code=exc.status,
+        content=exc.to_dict(),
+        media_type="application/problem+json",
+    )

@@ -3,11 +3,12 @@ End-to-end tests for the CoreSDK django-app example.
 Run: pytest test_app.py -v
 Requires DJANGO_SETTINGS_MODULE=api.settings (set in pytest.ini).
 """
+
 import json
 import pytest
 from django.test import Client
 
-AUTH  = {"HTTP_AUTHORIZATION": "Bearer alice-token"}
+AUTH = {"HTTP_AUTHORIZATION": "Bearer alice-token"}
 ADMIN = {"HTTP_AUTHORIZATION": "Bearer admin-token"}
 
 
@@ -18,6 +19,7 @@ def client():
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 
+
 def test_healthz(client):
     r = client.get("/healthz")
     assert r.status_code == 200
@@ -26,6 +28,7 @@ def test_healthz(client):
 
 
 # ── Auth enforcement ───────────────────────────────────────────────────────────
+
 
 def test_no_token_401(client):
     """No Authorization header must return 401."""
@@ -47,6 +50,7 @@ def test_me_returns_claims(client):
 
 
 # ── Products CRUD ──────────────────────────────────────────────────────────────
+
 
 def test_list_products(client):
     r = client.get("/products", **AUTH)
@@ -94,6 +98,7 @@ def test_delete_without_role_403(client):
 
 # ── Policy check ───────────────────────────────────────────────────────────────
 
+
 def test_policy_check(client):
     r = client.get("/policy/check?action=read&resource=reports/q4", **AUTH)
     assert r.status_code == 200
@@ -103,6 +108,7 @@ def test_policy_check(client):
 
 
 # ── Tenant isolation ───────────────────────────────────────────────────────────
+
 
 def test_tenant_scoped(client):
     """Products response must report the configured tenant (acme-corp)."""

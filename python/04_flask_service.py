@@ -12,6 +12,7 @@ Run:
     export CORESDK_SIDECAR_ADDR=[::1]:50051
     python 04_flask_service.py
 """
+
 import os
 import sys
 
@@ -21,7 +22,7 @@ from coresdk import SDK, require_auth
 from coresdk.middleware.flask import CoreSDKFlask
 
 SIDECAR = os.environ.get("CORESDK_SIDECAR_ADDR", "[::1]:50051")
-TENANT  = os.environ.get("CORESDK_TENANT_ID", "acme-corp")
+TENANT = os.environ.get("CORESDK_TENANT_ID", "acme-corp")
 
 # ── SDK (public API — no private imports) ─────────────────────────────────────
 _sdk = SDK.from_env()
@@ -52,6 +53,7 @@ def _user() -> str:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @app.get("/healthz")
 def healthz():
     return jsonify({"status": "ok"})
@@ -60,11 +62,13 @@ def healthz():
 @app.get("/products")
 def list_products():
     tenant = _tenant()
-    return jsonify({
-        "tenant":   tenant,
-        "user":     _user(),
-        "products": _store.get(tenant, []),
-    })
+    return jsonify(
+        {
+            "tenant": tenant,
+            "user": _user(),
+            "products": _store.get(tenant, []),
+        }
+    )
 
 
 @app.post("/products")
@@ -72,20 +76,25 @@ def list_products():
 def create_product():
     """Create a product — demonstrates rate limiting + audit event emission."""
     tenant = _tenant()
-    user   = _user()
+    user = _user()
 
     # Rate limiting: protect write endpoints from abuse
     rate = _sdk.check_rate_limit(f"create_product:{user}", tenant_id=tenant)
     if not rate.allowed:
-        return jsonify({
-            "error": "rate_limit_exceeded",
-            "retry_after": rate.retry_after_seconds,
-        }), 429
+        return jsonify(
+            {
+                "error": "rate_limit_exceeded",
+                "retry_after": rate.retry_after_seconds,
+            }
+        ), 429
 
     payload = request.get_json() or {}
-    new_id  = max((p["id"] for p in _store.get(tenant, [])), default=0) + 1
-    product = {"id": new_id, "name": payload.get("name", "Unnamed"),
-               "price": payload.get("price", 0.0)}
+    new_id = max((p["id"] for p in _store.get(tenant, [])), default=0) + 1
+    product = {
+        "id": new_id,
+        "name": payload.get("name", "Unnamed"),
+        "price": payload.get("price", 0.0),
+    }
     _store.setdefault(tenant, []).append(product)
 
     # Audit: record every write for compliance
@@ -104,17 +113,22 @@ def create_product():
 
 # ── Built-in test harness ─────────────────────────────────────────────────────
 if __name__ == "__main__":
-    RESET="\033[0m"; GREEN="\033[32m"; RED="\033[31m"; CYAN="\033[36m"
-    BOLD="\033[1m"; DIM="\033[2m"
+    RESET = "\033[0m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    CYAN = "\033[36m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
 
     results = []
+
     def check(name, passed, detail=""):
         results.append((name, passed))
         tag = f"{GREEN}PASS{RESET}" if passed else f"{RED}FAIL{RESET}"
         print(f"  [{tag}]  {BOLD}{name}{RESET}  {DIM}{detail}{RESET}")
 
     print(f"\n{BOLD}{CYAN}Flask Product Service — Real Sidecar Tests{RESET}")
-    print(f"{CYAN}{'='*50}{RESET}")
+    print(f"{CYAN}{'=' * 50}{RESET}")
 
     c = app.test_client()
     ALICE = {"Authorization": "Bearer alice-token"}
@@ -127,24 +141,35 @@ if __name__ == "__main__":
     check("Health bypasses auth → 200", r.status_code == 200)
 
     r = c.get("/products", headers=ALICE)
-    check("Token → sidecar → 200 (fail-open)", r.status_code == 200,
-          "sidecar responded, fail-open")
+    check(
+        "Token → sidecar → 200 (fail-open)",
+        r.status_code == 200,
+        "sidecar responded, fail-open",
+    )
 
     print(f"\n{BOLD}CRUD + Rate Limit + Audit{RESET}")
     r = c.get("/products", headers=ALICE)
-    check("List products", r.status_code == 200,
-          f"count={len(r.get_json().get('products', []))}")
+    check(
+        "List products",
+        r.status_code == 200,
+        f"count={len(r.get_json().get('products', []))}",
+    )
 
-    r = c.post("/products",
-               json={"name": "Widget C", "price": 199.00},
-               headers={**ALICE, "Content-Type": "application/json"})
+    r = c.post(
+        "/products",
+        json={"name": "Widget C", "price": 199.00},
+        headers={**ALICE, "Content-Type": "application/json"},
+    )
     # Without JWKS, fail-open claims are None → require_auth → 401/403 (expected).
     # In production with real JWKS: claims populated → rate check → audit → 201.
-    check("Create product (require_auth with fail-open → 401/403 expected)",
-          r.status_code in (201, 401, 403, 429), str(r.status_code))
+    check(
+        "Create product (require_auth with fail-open → 401/403 expected)",
+        r.status_code in (201, 401, 403, 429),
+        str(r.status_code),
+    )
 
     passed = sum(1 for _, ok in results if ok)
-    total  = len(results)
+    total = len(results)
     colour = GREEN if passed == total else RED
     print(f"\n{colour}{BOLD}{passed}/{total} passed{RESET}\n")
     sys.exit(0 if passed == total else 1)
