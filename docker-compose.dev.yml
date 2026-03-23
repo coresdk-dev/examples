@@ -1,0 +1,36 @@
+# docker-compose.dev.yml — starts sidecar + control plane wired together
+# Usage: docker compose -f docker-compose.dev.yml up
+version: "3.9"
+
+services:
+  sidecar:
+    image: ghcr.io/coresdk-dev/sidecar:latest
+    environment:
+      CORESDK_ENV: development
+      CORESDK_SIDECAR_ADDR: "[::]:50051"
+      CORESDK_CONTROL_PLANE_URL: http://control-plane:8080
+      CORESDK_CONTROL_PLANE_TOKEN: dev-token
+      CORESDK_TENANT_ID: default
+      CORESDK_LOG_LEVEL: info
+    ports:
+      - "50051:50051"
+      - "9091:9091"
+    depends_on:
+      - control-plane
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  control-plane:
+    image: ghcr.io/coresdk-dev/control-plane:latest
+    environment:
+      CONTROL_PLANE_TOKEN: dev-token
+    ports:
+      - "8080:8080"
+    volumes:
+      - cp-data:/var/lib/control-plane
+
+volumes:
+  cp-data:

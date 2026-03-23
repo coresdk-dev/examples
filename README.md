@@ -5,6 +5,20 @@
 
 Copy-paste examples for every CoreSDK feature. Each is self-contained — clone, install, run.
 
+## Quick dev stack (sidecar + control plane)
+
+```bash
+docker compose -f docker-compose.dev.yml up
+```
+
+This starts the sidecar on `:50051` / `:9091` and the control plane on `:8080`, pre-wired together. Use this for the policy + feature flag examples.
+
+Verify both are up:
+```bash
+curl http://localhost:9091/healthz    # {"status":"ok"}
+curl http://localhost:8080/health     # {"status":"ok"}
+```
+
 ## Setup (once)
 
 ```bash
@@ -20,7 +34,13 @@ tar xf coresdk-sidecar-x86_64-unknown-linux-gnu.tar.gz
 ./coresdk-sidecar &
 
 # Or via Docker (all platforms)
-docker run -d -p 50051:50051 ghcr.io/coresdk-dev/sidecar:latest
+docker run --rm \
+  -e CORESDK_ENV=development \
+  -e CORESDK_SIDECAR_ADDR=[::]:50051 \
+  -p 50051:50051 \
+  -p 9091:9091 \
+  ghcr.io/coresdk-dev/sidecar:latest
+# Verify: curl http://localhost:9091/healthz  →  {"status":"ok"}
 
 # 2. Install the Python SDK
 pip install "coresdk[fastapi,flask,django]"
