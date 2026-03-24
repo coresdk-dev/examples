@@ -1,4 +1,5 @@
 """Example: SSRF firewall — block outbound requests to internal IPs."""
+
 from coresdk import SDK
 from coresdk.egress import CoreSDKSession
 
@@ -8,7 +9,11 @@ print("=== SSRF Firewall Example ===\n")
 
 # Direct API check
 print("Direct egress check:")
-for url in ["https://api.example.com/data", "http://169.254.169.254/latest/meta-data/", "http://192.168.1.1/admin"]:
+for url in [
+    "https://api.example.com/data",
+    "http://169.254.169.254/latest/meta-data/",
+    "http://192.168.1.1/admin",
+]:
     decision = sdk.check_egress(url)
     status = "ALLOWED" if decision.allowed else "BLOCKED"
     print(f"  {status}  {url}")

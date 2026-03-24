@@ -1,4 +1,5 @@
 """Example: Agent-to-agent JWT delegation — mint a child token from a parent."""
+
 import os
 from coresdk import SDK
 
