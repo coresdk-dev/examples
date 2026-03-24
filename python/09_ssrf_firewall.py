@@ -1,5 +1,4 @@
 """Example: SSRF firewall — block outbound requests to internal IPs."""
-import os
 from coresdk import SDK
 from coresdk.egress import CoreSDKSession
 
