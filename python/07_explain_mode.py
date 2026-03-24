@@ -17,12 +17,12 @@ print(f"Request ID: {result.request_id}")
 print(f"Latency:    {result.latency_ms:.1f}ms")
 
 if result.auth:
-    print(f"\nAuth details:")
+    print("\nAuth details:")
     for k, v in result.auth.items():
         print(f"  {k}: {v}")
 
 if result.policy:
-    print(f"\nPolicy details:")
+    print("\nPolicy details:")
     for k, v in result.policy.items():
         print(f"  {k}: {v}")
 

@@ -17,12 +17,12 @@ agent = sdk.mint_agent_token(
     ttl_seconds=120,
 )
 
-print(f"\nMinted agent token:")
+print("\nMinted agent token:")
 print(f"  Token (first 40): {agent.token[:40]}...")
 print(f"  Expires in:       {agent.expires_in_seconds}s")
 print(f"  Delegation chain: {' -> '.join(agent.agent_chain)}")
 
 # Now pass agent.token to the downstream service
 # The downstream service validates it as a normal JWT
-print(f"\nPass agent.token to data-service as Bearer token.")
+print("\nPass agent.token to data-service as Bearer token.")
 print("Set CORESDK_AGENT_SIGNING_SECRET for persistent key across restarts.")
