@@ -12,9 +12,46 @@ without running a separate OPA process or depending on a C/Go runtime.
 Policies are structured as packages (e.g. `package authz`) with named rules.
 CoreSDK evaluates a single boolean rule per request (default: `data.authz.allow`).
 
-## Loading a bundle via coresdk.toml
+## Deploying via the control plane (recommended for production)
 
-Point `bundle_dir` at this directory relative to your application:
+The control plane distributes policies to all connected sidecars. The sidecar
+hot-reloads the policy bundle on each sync tick (default 30s) without restarting.
+
+```bash
+# Start the control plane (if not already running)
+docker run -d --name coresdk-cp \
+  -e CORESDK_CONTROL_PLANE_API_KEY=dev-token \
+  -p 8080:8080 \
+  ghcr.io/coresdk-dev/control-plane:latest
+
+# Upload this policy bundle
+BUNDLE_B64=$(base64 -i policy/authz.rego)
+curl -s -X PUT http://localhost:8080/api/v1/policies \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d "{\"bundle_b64\": \"$BUNDLE_B64\"}"
+```
+
+To combine multiple `.rego` files into one bundle upload:
+
+```bash
+cat policy/authz.rego policy/tenant_isolation.rego | base64 | tr -d '\n' > /tmp/bundle.b64
+curl -s -X PUT http://localhost:8080/api/v1/policies \
+  -H "Authorization: Bearer dev-token" \
+  -H "Content-Type: application/json" \
+  -d "{\"bundle_b64\": \"$(cat /tmp/bundle.b64)\"}"
+```
+
+Watch for the sidecar log line confirming the reload:
+
+```
+Policy bundle hot-reloaded from control plane
+```
+
+## Loading a bundle via coresdk.toml (local dev shortcut)
+
+For local development you can point the sidecar directly at a local directory
+and skip the control plane:
 
 ```toml
 [policy]

@@ -5,6 +5,18 @@
 
 Copy-paste examples for every CoreSDK feature. Each is self-contained — clone, install, run.
 
+## Start here
+
+| Goal | Where to look |
+|------|--------------|
+| "I want to see a complete working app" | [`python/fastapi-app/`](python/fastapi-app/) — full FastAPI app with auth + Rego + audit |
+| "I want to understand the Rego policy language" | [`policy/README.md`](policy/README.md) — RBAC/ABAC patterns, input fields, deployment |
+| "I just want the minimum code to connect" | [`python/01_quickstart.py`](python/01_quickstart.py) |
+| "I want to test Rego policy enforcement" | [`python/05_policy_enforcement.py`](python/05_policy_enforcement.py) |
+| "I'm building in Go" | [`go/gin-auth/`](go/gin-auth/) |
+| "I'm building in TypeScript/Node.js" | [`typescript/express-auth/`](typescript/express-auth/) |
+| "I'm deploying a policy via the control plane" | [`policy/README.md` → Deploying via control plane](policy/README.md#deploying-via-the-control-plane-recommended-for-production) |
+
 ## Quick dev stack (sidecar + control plane)
 
 ```bash
